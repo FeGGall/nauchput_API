@@ -9,6 +9,7 @@ class StudentCreate(BaseModel):
     course: int | None = None
     description: str | None = None
     desired_topic: str | None = None
+    photo_url: str | None = None
 
 class SupervisorCreate(BaseModel):
     max_user_id: int
@@ -19,6 +20,7 @@ class SupervisorCreate(BaseModel):
     description: str | None = None
     available_places: int = 0
     email: str | None = None
+    photo_url: str | None = None
 
 class InterestsUpdate(BaseModel):
     interest_ids: list[int]

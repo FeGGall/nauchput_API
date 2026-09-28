@@ -1,13 +1,11 @@
 import os
 import secrets
 from datetime import datetime, timedelta
-
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
 from database import get_db, check_database
 from schemas import (
     StudentCreate,
@@ -17,53 +15,39 @@ from schemas import (
     EmailCodeVerify,
 )
 from email_service import send_verification_email
-
-
 load_dotenv()
-
 API_KEY = os.getenv("API_KEY")
-
 app = FastAPI(
     title="НаучПуть API",
     description="API сервиса подбора научных руководителей",
     version="1.0.0",
 )
-
 api_key_header = APIKeyHeader(
     name="X-API-Key",
     auto_error=False,
 )
-
-
 def verify_api_key(api_key: str = Security(api_key_header)):
     if not API_KEY:
         raise HTTPException(
             status_code=500,
             detail="API_KEY is not configured",
         )
-
     if api_key != API_KEY:
         raise HTTPException(
             status_code=401,
             detail="Invalid API key",
         )
-
-
 @app.get("/")
 def root():
     return {
         "service": "НаучПуть API",
         "status": "ok",
     }
-
-
 @app.get("/health")
 def health():
     return {
         "status": "ok",
     }
-
-
 @app.get("/db-health")
 def db_health():
     try:
@@ -76,8 +60,6 @@ def db_health():
             status_code=500,
             detail=f"Database error: {str(e)}",
         )
-
-
 @app.post("/students")
 def create_student(
     student: StudentCreate,
@@ -95,13 +77,11 @@ def create_student(
                 "max_user_id": student.max_user_id,
             },
         ).mappings().first()
-
         if existing_user:
             raise HTTPException(
                 status_code=409,
                 detail="User with this max_user_id already exists",
             )
-
         result = db.execute(
             text("""
                 INSERT INTO users (
@@ -120,9 +100,7 @@ def create_student(
                 "name": student.name,
             },
         )
-
         user_id = result.lastrowid
-
         result = db.execute(
             text("""
                 INSERT INTO students (
@@ -131,7 +109,8 @@ def create_student(
                     faculty,
                     course,
                     description,
-                    desired_topic
+                    desired_topic,
+                    photo_url
                 )
                 VALUES (
                     :user_id,
@@ -139,7 +118,8 @@ def create_student(
                     :faculty,
                     :course,
                     :description,
-                    :desired_topic
+                    :desired_topic,
+                    :photo_url
                 )
             """),
             {
@@ -149,31 +129,25 @@ def create_student(
                 "course": student.course,
                 "description": student.description,
                 "desired_topic": student.desired_topic,
+                "photo_url": student.photo_url,
             },
         )
-
         student_id = result.lastrowid
-
         db.commit()
-
         return {
             "status": "created",
             "student_id": student_id,
             "user_id": user_id,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.get("/students/{max_user_id}")
 def get_student(
     max_user_id: int,
@@ -192,6 +166,7 @@ def get_student(
                 students.course,
                 students.description,
                 students.desired_topic,
+students.photo_url,
                 students.is_active,
                 users.created_at,
                 users.updated_at
@@ -205,16 +180,12 @@ def get_student(
             "max_user_id": max_user_id,
         },
     ).mappings().first()
-
     if not student:
         raise HTTPException(
             status_code=404,
             detail="Student not found",
         )
-
     return dict(student)
-
-
 @app.post("/students/{student_id}/interests")
 def update_student_interests(
     student_id: int,
@@ -233,13 +204,11 @@ def update_student_interests(
                 "student_id": student_id,
             },
         ).first()
-
         if not student:
             raise HTTPException(
                 status_code=404,
                 detail="Student not found",
             )
-
         db.execute(
             text("""
                 DELETE FROM student_interests
@@ -249,7 +218,6 @@ def update_student_interests(
                 "student_id": student_id,
             },
         )
-
         for interest_id in data.interest_ids:
             interest = db.execute(
                 text("""
@@ -261,13 +229,11 @@ def update_student_interests(
                     "interest_id": interest_id,
                 },
             ).first()
-
             if not interest:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Interest {interest_id} does not exist",
                 )
-
             db.execute(
                 text("""
                     INSERT INTO student_interests (
@@ -284,27 +250,21 @@ def update_student_interests(
                     "interest_id": interest_id,
                 },
             )
-
         db.commit()
-
         return {
             "status": "updated",
             "student_id": student_id,
             "interest_ids": data.interest_ids,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.get("/students/{student_id}/matches")
 def get_student_matches(
     student_id: int,
@@ -321,13 +281,11 @@ def get_student_matches(
             "student_id": student_id,
         },
     ).first()
-
     if not student:
         raise HTTPException(
             status_code=404,
             detail="Student not found",
         )
-
     matches = db.execute(
         text("""
             SELECT
@@ -346,27 +304,21 @@ def get_student_matches(
                     SEPARATOR ', '
                 ) AS matched_interests
             FROM student_interests
-
             JOIN supervisor_interests
                 ON student_interests.interest_id =
                    supervisor_interests.interest_id
-
             JOIN research_interests
                 ON research_interests.id =
                    student_interests.interest_id
-
             JOIN supervisors
                 ON supervisors.id =
                    supervisor_interests.supervisor_id
-
             JOIN users
                 ON users.id = supervisors.user_id
-
             WHERE student_interests.student_id = :student_id
               AND supervisors.is_active = 1
               AND supervisors.available_places > 0
               AND supervisors.email_verified = 1
-
             GROUP BY
                 supervisors.id,
                 users.name,
@@ -376,20 +328,16 @@ def get_student_matches(
                 supervisors.description,
                 supervisors.available_places,
                 supervisors.email
-
             ORDER BY common_interests DESC
         """),
         {
             "student_id": student_id,
         },
     ).mappings().all()
-
     return {
         "student_id": student_id,
         "matches": [dict(match) for match in matches],
     }
-
-
 @app.post("/supervisors")
 def create_supervisor(
     supervisor: SupervisorCreate,
@@ -407,13 +355,11 @@ def create_supervisor(
                 "max_user_id": supervisor.max_user_id,
             },
         ).mappings().first()
-
         if existing_user:
             raise HTTPException(
                 status_code=409,
                 detail="User with this max_user_id already exists",
             )
-
         result = db.execute(
             text("""
                 INSERT INTO users (
@@ -432,9 +378,7 @@ def create_supervisor(
                 "name": supervisor.name,
             },
         )
-
         user_id = result.lastrowid
-
         result = db.execute(
             text("""
                 INSERT INTO supervisors (
@@ -466,29 +410,22 @@ def create_supervisor(
                 "email": supervisor.email,
             },
         )
-
         supervisor_id = result.lastrowid
-
         db.commit()
-
         return {
             "status": "created",
             "supervisor_id": supervisor_id,
             "user_id": user_id,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.get("/supervisors/{max_user_id}")
 def get_supervisor(
     max_user_id: int,
@@ -510,7 +447,8 @@ def get_supervisor(
                 supervisors.email,
                 supervisors.email_verified,
                 supervisors.supervisor_verified,
-                supervisors.verified_at,
+supervisors.verified_at,
+                supervisors.photo_url,
                 supervisors.is_active,
                 users.created_at,
                 users.updated_at
@@ -524,16 +462,12 @@ def get_supervisor(
             "max_user_id": max_user_id,
         },
     ).mappings().first()
-
     if not supervisor:
         raise HTTPException(
             status_code=404,
             detail="Supervisor not found",
         )
-
     return dict(supervisor)
-
-
 @app.post("/supervisors/{supervisor_id}/interests")
 def update_supervisor_interests(
     supervisor_id: int,
@@ -552,13 +486,11 @@ def update_supervisor_interests(
                 "supervisor_id": supervisor_id,
             },
         ).first()
-
         if not supervisor:
             raise HTTPException(
                 status_code=404,
                 detail="Supervisor not found",
             )
-
         db.execute(
             text("""
                 DELETE FROM supervisor_interests
@@ -568,7 +500,6 @@ def update_supervisor_interests(
                 "supervisor_id": supervisor_id,
             },
         )
-
         for interest_id in data.interest_ids:
             interest = db.execute(
                 text("""
@@ -580,13 +511,11 @@ def update_supervisor_interests(
                     "interest_id": interest_id,
                 },
             ).first()
-
             if not interest:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Interest {interest_id} does not exist",
                 )
-
             db.execute(
                 text("""
                     INSERT INTO supervisor_interests (
@@ -603,27 +532,21 @@ def update_supervisor_interests(
                     "interest_id": interest_id,
                 },
             )
-
         db.commit()
-
         return {
             "status": "updated",
             "supervisor_id": supervisor_id,
             "interest_ids": data.interest_ids,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.post("/applications")
 def create_application(
     application: ApplicationCreate,
@@ -642,13 +565,11 @@ def create_application(
                 "student_id": application.student_id,
             },
         ).first()
-
         if not student:
             raise HTTPException(
                 status_code=404,
                 detail="Student not found",
             )
-
         supervisor = db.execute(
             text("""
                 SELECT
@@ -662,25 +583,21 @@ def create_application(
                 "supervisor_id": application.supervisor_id,
             },
         ).mappings().first()
-
         if not supervisor:
             raise HTTPException(
                 status_code=404,
                 detail="Supervisor not found",
             )
-
         if not supervisor["is_active"]:
             raise HTTPException(
                 status_code=400,
                 detail="Supervisor is inactive",
             )
-
         if supervisor["available_places"] <= 0:
             raise HTTPException(
                 status_code=400,
                 detail="Supervisor has no available places",
             )
-
         existing = db.execute(
             text("""
                 SELECT id
@@ -694,13 +611,11 @@ def create_application(
                 "supervisor_id": application.supervisor_id,
             },
         ).first()
-
         if existing:
             raise HTTPException(
                 status_code=409,
                 detail="Pending application already exists",
             )
-
         result = db.execute(
             text("""
                 INSERT INTO applications (
@@ -722,28 +637,21 @@ def create_application(
                 "message": application.message,
             },
         )
-
         application_id = result.lastrowid
-
         db.commit()
-
         return {
             "status": "created",
             "application_id": application_id,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.get("/students/{student_id}/applications")
 def get_student_applications(
     student_id: int,
@@ -776,13 +684,10 @@ def get_student_applications(
             "student_id": student_id,
         },
     ).mappings().all()
-
     return {
         "student_id": student_id,
         "applications": [dict(application) for application in applications],
     }
-
-
 @app.get("/supervisors/{supervisor_id}/applications")
 def get_supervisor_applications(
     supervisor_id: int,
@@ -817,13 +722,10 @@ def get_supervisor_applications(
             "supervisor_id": supervisor_id,
         },
     ).mappings().all()
-
     return {
         "supervisor_id": supervisor_id,
         "applications": [dict(application) for application in applications],
     }
-
-
 @app.patch("/applications/{application_id}/accept")
 def accept_application(
     application_id: int,
@@ -845,19 +747,16 @@ def accept_application(
                 "application_id": application_id,
             },
         ).mappings().first()
-
         if not application:
             raise HTTPException(
                 status_code=404,
                 detail="Application not found",
             )
-
         if application["status"] != "pending":
             raise HTTPException(
                 status_code=400,
                 detail="Application is not pending",
             )
-
         supervisor = db.execute(
             text("""
                 SELECT
@@ -871,19 +770,16 @@ def accept_application(
                 "supervisor_id": application["supervisor_id"],
             },
         ).mappings().first()
-
         if not supervisor:
             raise HTTPException(
                 status_code=404,
                 detail="Supervisor not found",
             )
-
         if supervisor["available_places"] <= 0:
             raise HTTPException(
                 status_code=400,
                 detail="Supervisor has no available places",
             )
-
         db.execute(
             text("""
                 UPDATE applications
@@ -894,7 +790,6 @@ def accept_application(
                 "application_id": application_id,
             },
         )
-
         db.execute(
             text("""
                 UPDATE supervisors
@@ -905,26 +800,20 @@ def accept_application(
                 "supervisor_id": application["supervisor_id"],
             },
         )
-
         db.commit()
-
         return {
             "status": "accepted",
             "application_id": application_id,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.patch("/applications/{application_id}/reject")
 def reject_application(
     application_id: int,
@@ -944,19 +833,16 @@ def reject_application(
                 "application_id": application_id,
             },
         ).mappings().first()
-
         if not application:
             raise HTTPException(
                 status_code=404,
                 detail="Application not found",
             )
-
         if application["status"] != "pending":
             raise HTTPException(
                 status_code=400,
                 detail="Application is not pending",
             )
-
         db.execute(
             text("""
                 UPDATE applications
@@ -967,26 +853,20 @@ def reject_application(
                 "application_id": application_id,
             },
         )
-
         db.commit()
-
         return {
             "status": "rejected",
             "application_id": application_id,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.post("/supervisors/{supervisor_id}/email/check-domain")
 def check_supervisor_email_domain(
     supervisor_id: int,
@@ -1006,23 +886,18 @@ def check_supervisor_email_domain(
             "supervisor_id": supervisor_id,
         },
     ).mappings().first()
-
     if not supervisor:
         raise HTTPException(
             status_code=404,
             detail="Supervisor not found",
         )
-
     email = supervisor["email"]
-
     if not email or "@" not in email:
         return {
             "valid": False,
             "detail": "Invalid email",
         }
-
     email_domain = email.rsplit("@", 1)[1].lower().strip()
-
     university = db.execute(
         text("""
             SELECT id
@@ -1035,13 +910,11 @@ def check_supervisor_email_domain(
             "university": supervisor["university"],
         },
     ).mappings().first()
-
     if not university:
         return {
             "valid": False,
             "detail": "University not found",
         }
-
     domain = db.execute(
         text("""
             SELECT id
@@ -1055,13 +928,10 @@ def check_supervisor_email_domain(
             "domain": email_domain,
         },
     ).first()
-
     return {
         "valid": domain is not None,
         "domain": email_domain,
     }
-
-
 @app.post("/supervisors/{supervisor_id}/email/send-code")
 def send_supervisor_email_code(
     supervisor_id: int,
@@ -1082,23 +952,18 @@ def send_supervisor_email_code(
                 "supervisor_id": supervisor_id,
             },
         ).mappings().first()
-
         if not supervisor:
             raise HTTPException(
                 status_code=404,
                 detail="Supervisor not found",
             )
-
         email = supervisor["email"]
-
         if not email or "@" not in email:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid email",
             )
-
         email_domain = email.rsplit("@", 1)[1].lower().strip()
-
         university = db.execute(
             text("""
                 SELECT id
@@ -1111,13 +976,11 @@ def send_supervisor_email_code(
                 "university": supervisor["university"],
             },
         ).mappings().first()
-
         if not university:
             raise HTTPException(
                 status_code=400,
                 detail="University not found",
             )
-
         allowed_domain = db.execute(
             text("""
                 SELECT id
@@ -1131,16 +994,13 @@ def send_supervisor_email_code(
                 "domain": email_domain,
             },
         ).first()
-
         if not allowed_domain:
             raise HTTPException(
                 status_code=400,
                 detail="Email domain does not match university",
             )
-
         code = f"{secrets.randbelow(1000000):06d}"
         expires_at = datetime.now() + timedelta(minutes=10)
-
         db.execute(
             text("""
                 DELETE FROM email_verification_codes
@@ -1150,7 +1010,6 @@ def send_supervisor_email_code(
                 "supervisor_id": supervisor_id,
             },
         )
-
         db.execute(
             text("""
                 INSERT INTO email_verification_codes (
@@ -1170,9 +1029,7 @@ def send_supervisor_email_code(
                 "expires_at": expires_at,
             },
         )
-
         db.commit()
-
         try:
             send_verification_email(email, code)
         except Exception as e:
@@ -1186,28 +1043,22 @@ def send_supervisor_email_code(
                 },
             )
             db.commit()
-
             raise HTTPException(
                 status_code=500,
                 detail=f"Email sending error: {str(e)}",
             )
-
         return {
             "status": "sent",
             "expires_in_seconds": 600,
         }
-
     except HTTPException:
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=str(e),
         )
-
-
 @app.post("/supervisors/{supervisor_id}/email/verify-code")
 def verify_supervisor_email_code(
     supervisor_id: int,
@@ -1226,13 +1077,11 @@ def verify_supervisor_email_code(
                 "supervisor_id": supervisor_id,
             },
         ).first()
-
         if not supervisor:
             raise HTTPException(
                 status_code=404,
                 detail="Supervisor not found",
             )
-
         verification = db.execute(
             text("""
                 SELECT
@@ -1248,13 +1097,11 @@ def verify_supervisor_email_code(
                 "supervisor_id": supervisor_id,
             },
         ).mappings().first()
-
         if not verification:
             raise HTTPException(
                 status_code=400,
                 detail="Verification code not found",
             )
-
         if datetime.now() > verification["expires_at"]:
             db.execute(
                 text("""
@@ -1265,20 +1112,16 @@ def verify_supervisor_email_code(
                     "supervisor_id": supervisor_id,
                 },
             )
-
             db.commit()
-
             raise HTTPException(
                 status_code=400,
                 detail="Verification code expired",
             )
-
         if data.code != verification["code"]:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid verification code",
             )
-
         db.execute(
             text("""
                 UPDATE supervisors
@@ -1291,7 +1134,6 @@ def verify_supervisor_email_code(
                 "supervisor_id": supervisor_id,
             },
         )
-
         db.execute(
             text("""
                 DELETE FROM email_verification_codes
@@ -1301,18 +1143,14 @@ def verify_supervisor_email_code(
                 "supervisor_id": supervisor_id,
             },
         )
-
         db.commit()
-
         return {
             "status": "verified",
             "supervisor_id": supervisor_id,
         }
-
     except HTTPException:
         db.rollback()
         raise
-
     except Exception as e:
         db.rollback()
         raise HTTPException(
