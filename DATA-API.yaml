@@ -1,0 +1,35 @@
+schemaVersion: "1.0"
+
+solution:
+  name: "НаучПуть"
+
+api:
+  baseUrl: "https://nauchput-api.onrender.com"
+  openapi: "openapi.json"
+  defaultHeaders:
+    Accept: "application/json"
+
+checks:
+  - id: "health"
+    name: "Проверка доступности API"
+    description: "Проверяет, что API проекта НаучПуть доступен по HTTPS."
+    method: "GET"
+    path: "/health"
+    role: "public"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+    timeoutMs: 60000
+    repeatable: true
+
+  - id: "db-health"
+    name: "Проверка подключения к базе данных"
+    description: "Проверяет соединение API проекта НаучПуть с MySQL."
+    method: "GET"
+    path: "/db-health"
+    role: "public"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+    timeoutMs: 60000
+    repeatable: true
